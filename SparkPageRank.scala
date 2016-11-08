@@ -16,29 +16,19 @@
  */
 
 import org.apache.spark.sql.SparkSession
+import org.apache.spark.Partitioner
 
 // spark-submit --class "PartA" --properties-file=./conf/spark-defaults.conf  target/scala-2.11/hw2_2.11-1.0.jar /graph 10
 
 object SparkPageRank {
-  def showWarning() {
-    System.err.println(
-      """WARN: This is a naive implementation of PageRank and is given as an example!
-        |Please use the PageRank implementation found in org.apache.spark.graphx.lib.PageRank
-        |for more conventional use.
-      """.stripMargin)
-  }
-
   def main(args: Array[String]) {
     if (args.length < 1) {
       System.err.println("Usage: SparkPageRank <file> <iter>")
       System.exit(1)
     }
 
-    showWarning()
-
     val spark = SparkSession
       .builder
-      .appName("SparkPageRank")
       .getOrCreate()
 
     val iters = if (args.length > 1) args(1).toInt else 10
@@ -46,7 +36,7 @@ object SparkPageRank {
     val links = lines.map{ s =>
       val parts = s.split("\\s+")
       (parts(0), parts(1))
-    }.distinct().groupByKey().cache()
+    }.distinct().groupByKey()
     var ranks = links.mapValues(v => 1.0)
 
     for (i <- 1 to iters) {
@@ -58,7 +48,95 @@ object SparkPageRank {
     }
 
     val output = ranks.collect()
-//    output.foreach(tup => println(tup._1 + " has rank: " + tup._2 + "."))
+    output.foreach(tup => println(tup._1 + " has rank: " + tup._2 + "."))
     spark.stop()
+  }
+}
+
+
+object SparkPageRankWithCustomPartitioner {
+  def main(args: Array[String]) {
+    if (args.length < 1) {
+      System.err.println("Usage: SparkPageRank <file> <iter>")
+      System.exit(1)
+    }
+    val spark = SparkSession
+      .builder
+      .getOrCreate()
+
+    val partitioner = new CustomPartitioner(100)
+
+    val iters = if (args.length > 1) args(1).toInt else 10
+    val lines = spark.read.textFile(args(0)).rdd
+    val links = lines.map { s =>
+      val parts = s.split("\\s+")
+      (parts(0), parts(1))
+    }.partitionBy(partitioner).distinct().groupByKey()
+    var ranks = links.mapValues(v => 1.0).partitionBy(partitioner)
+
+    for (i <- 1 to iters) {
+      val contribs = links.join(ranks).values.flatMap { case (urls, rank) =>
+        val size = urls.size
+        urls.map(url => (url, rank / size))
+      }
+      ranks = contribs.reduceByKey(_ + _).mapValues(0.15 + 0.85 * _)
+    }
+
+    val output = ranks.collect()
+    output.foreach(tup => println(tup._1 + " has rank: " + tup._2 + "."))
+    spark.stop()
+  }
+}
+
+object SparkPageRankWithCustomPartitionerWithCache {
+  def main(args: Array[String]) {
+    if (args.length < 1) {
+      System.err.println("Usage: SparkPageRank <file> <iter>")
+      System.exit(1)
+    }
+    val spark = SparkSession
+      .builder
+      .getOrCreate()
+
+    val partitioner = new CustomPartitioner(100)
+
+    val iters = if (args.length > 1) args(1).toInt else 10
+    val lines = spark.read.textFile(args(0)).rdd
+    val links = lines.map { s =>
+      val parts = s.split("\\s+")
+      (parts(0), parts(1))
+    }.partitionBy(partitioner).distinct().groupByKey().cache()
+    var ranks = links.mapValues(v => 1.0).partitionBy(partitioner).cache()
+
+    for (i <- 1 to iters) {
+      val contribs = links.join(ranks).values.flatMap { case (urls, rank) =>
+        val size = urls.size
+        urls.map(url => (url, rank / size))
+      }
+      ranks = contribs.reduceByKey(_ + _).mapValues(0.15 + 0.85 * _)
+    }
+
+    val output = ranks.collect()
+    //    output.foreach(tup => println(tup._1 + " has rank: " + tup._2 + "."))
+    spark.stop()
+  }
+}
+
+class CustomPartitioner(numParts: Int) extends Partitioner {
+  override def numPartitions: Int = numParts
+
+  override def getPartition(key: Any): Int = {
+    var temp = key.toString.toInt
+    while (temp >= numPartitions) {
+      temp /= 10
+    }
+    return temp
+  }
+
+  override def equals(other: Any): Boolean = other match {
+    case h: CustomPartitioner =>
+      h.numPartitions == numPartitions
+    case _ =>
+      false
   }
 }
