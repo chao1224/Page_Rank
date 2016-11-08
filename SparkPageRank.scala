@@ -15,13 +15,11 @@
  * limitations under the License.
  */
 
-// scalastyle:off println
-package org.apache.spark.examples
-
 import org.apache.spark.sql.SparkSession
 
-object SparkPageRank {
+// spark-submit --class "PartA" --properties-file=./conf/spark-defaults.conf  target/scala-2.11/hw2_2.11-1.0.jar /graph 10
 
+object SparkPageRank {
   def showWarning() {
     System.err.println(
       """WARN: This is a naive implementation of PageRank and is given as an example!
@@ -60,8 +58,7 @@ object SparkPageRank {
     }
 
     val output = ranks.collect()
-    output.foreach(tup => println(tup._1 + " has rank: " + tup._2 + "."))
-
+//    output.foreach(tup => println(tup._1 + " has rank: " + tup._2 + "."))
     spark.stop()
   }
 }
